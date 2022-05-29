@@ -18,10 +18,7 @@ const char* ssid = "";
 const char* password = "";
 char HOST_ADDRESS[] = "";
 char CLIENT_ID[] = "ESP32_Smart_FishBowl";
-//char sTOPIC_NAME[] = "esp32/led"; // subscribe topic name
 char sTOPIC_NAME[] = "smartfishbowl/subscribe";
-//char pTOPIC_NAME[] = "esp32/bme280"; // publish topic name
-//char pTOPIC_NAME[] = "smartfishbowl/publish";
 char pTOPIC_NAME[] = "$aws/things/smart_fishbowl/shadow/update";
 int status = WL_IDLE_STATUS;
 int msgCount = 0, msgReceived = 0;
@@ -32,6 +29,8 @@ unsigned long checkMil = 0;
 const long intMil = 5000;
 const long flagMil = 10000; // 10초
 
+int fish_hour[3];
+int fish_min[3];
 WiFiServer server(80);
 
 String header;
@@ -45,8 +44,8 @@ String output17State = "off";
 int temp = 0; // recent temp
 int watering_day = 14; // time
 int fish_food_amount = 0; // amount/once
-int fish_food_count = 0; // 먹이를 주는 횟수
-int fish_food_time[] = {}; // 먹이를 주는 시간 fish_food_count에 따라 크기가 달라짐 최대 10번
+int fish_food_count = 3; // 먹이를 주는 횟수
+String fish_food_time[3] = {"11:22", "11:35", "11:40"}; // 먹이를 주는 시간 fish_food_count에 따라 크기가 달라짐 최대 10번
 int fishbowl_oxygen = 0; // amount/min
 // state는 -1, 1이면 비정상, 0이면 정상이다.
 int temp_state = 0; // -1: 온도가 낮음, 0: 정상온도, 1: 온도가 높음
@@ -133,8 +132,21 @@ boolean start() {
     while (1);
   }
 
+  Serial.println("set food time!!");
+  // default값 또는 웹서버에서 받은 시간을 파싱한다.
+  for (int j = 0; j < 3; j++)
+  {
+    fish_hour[j] = ((fish_food_time[j][0] - '0') * 10) + fish_food_time[j][1] - '0';
+    fish_min[j] = ((fish_food_time[j][3] - '0') * 10) + fish_food_time[j][4] - '0';
+
+    Serial.println("fish_hour[" + String(j) + "]: " + String(fish_hour[j]));
+    Serial.println("fish_min[" + String(j) + "]: " + String(fish_min[j]));
+
+  }
+
   Serial.println("start server!");
   server.begin();
+
 }
 
 void checkMessage() {
@@ -176,8 +188,16 @@ void publish() {
 }
 
 void check_state() {
+  struct tm timeinfo;
+  int nowtime = -1;
+
+  if (!getLocalTime(&timeinfo))
+  {
+    Serial.println("Failed to obtain time");
+    return;
+  }
+
   // 현재 온도를 체크하여 비교합니다.
-  int nowtime = 0;
   // 온도를 체크합니다.
   if (now_temp >= temp + 2) { // 온도가 너무 높다
     Serial.println("temp is too hot");
@@ -200,24 +220,28 @@ void check_state() {
     Serial.println("Need to change water today");
   }
 
-  // 먹이를 줬는지를 확인합니다.
-  //  for (int i; i < fish_food_count; i++) {
-  //    // 현재 시간이 먹이를 주는 시간이고,
-  //    // 먹이를 한번 주었다면, 같은 시간대라도 먹이를 다시 주지 않습니다.
-  //    // nowtime: 추후 현재시간을 받아 체크로 바꿈
-  //    if (nowtime == fish_food_time[i] and i == now_fish_food_count) {
-  //      feeding();
-  //      now_fish_food_count++;
-  //    }
-  //  }
 
-  feeding();
+  //  먹이를 줬는지를 확인합니다.
+  for (int i = 0; i < fish_food_count; i++) {
+    // 현재 시간이 먹이를 주는 시간이고,
+    // 먹이를 한번 주었다면, 같은 시간대라도 먹이를 다시 주지 않습니다.
+    // nowtime: 추후 현재시간을 받아 체크로 바꿈
+
+    if (timeinfo.tm_hour == fish_hour[i] and timeinfo.tm_min == fish_min[i] and i == now_fish_food_count) {
+      feeding();
+      now_fish_food_count++;
+      Serial.print("now_fish_food_count: ");
+      Serial.println(now_fish_food_count);
+    }
+  }
+
+  //  feeding();
 
 
   // 하루가 지났다면 먹이를 주는 횟수를 초기화합니다.
   // nowtime: 추후 현재시간을 받아 체크로 바꿈
   // 0: 0시0분 정각을 뜻함
-  if (nowtime == 0) {
+  if (timeinfo.tm_hour == 0 and timeinfo.tm_min) {
     now_fish_food_count == 0;
   }
 
@@ -243,6 +267,7 @@ void watering() {
 
 void feeding() {
   // 먹이를 준다.
+  Serial.println("start feeding");
   motorA.writeMicroseconds(MAX_SIGNAL);
   delay(600);
 
