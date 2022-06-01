@@ -4,6 +4,8 @@
 #include <Arduino_JSON.h>
 #include <WiFi.h>
 #include "time.h"
+#include <Wire.h> // I2C
+
 
 #include <ESP32_Servo.h>
 #define MIN_SIGNAL 800
@@ -58,6 +60,11 @@ int now_watering_day = 0;
 int now_fish_food_count = 0;
 int now_oxygen = 0;
 
+// I2C 사용할 경우 slave 설정
+// int slave1 = 1;
+// int slave2 = 2;
+
+
 
 // 서보 모터 확인
 int motorA_pin = 3;
@@ -96,6 +103,7 @@ void mySubCallBackHandler (char *topicName, int payloadLen, char *payLoad)
 
 
 boolean start() {
+//  Wire.begin(); // 마스터 부분
   Serial.print("Connecting to ");
   Serial.println(ssid);
   WiFi.mode(WIFI_STA);
@@ -202,19 +210,31 @@ void check_state() {
   if (now_temp >= temp + 2) { // 온도가 너무 높다
     Serial.println("temp is too hot");
     temp_change(-1); // 온도 내림
+    // I2C 사용시
+    // Wire.beginTransmission(slave1);
+    // Wire.wirte('temp_-1')
   }
   else if ( now_temp <= temp - 2) { // 온도가 너무 낮다
     Serial.println("temp is too cold");
     temp_change(1); // 온도 올림
+    // I2C 사용시
+    // Wire.beginTransmission(slave1);
+    // Wire.wirte('temp_-1')
   }
   else { // 온도가 정상이다
     temp_change(0); // 온도를 변화시키지 않음
+    // I2C 사용시
+    // Wire.beginTransmission(slave1);
+    // Wire.wirte('temp_-1')
   }
 
   // 물을 가는 날인지 확인합니다.
   if (now_watering_day < watering_day) {
     Serial.println("It is not time to change water");
     watering();
+    // I2C 사용시
+    // Wire.beginTransmission(slave1);
+    // Wire.wirte('watering')
   }
   else {
     Serial.println("Need to change water today");
@@ -232,11 +252,11 @@ void check_state() {
       now_fish_food_count++;
       Serial.print("now_fish_food_count: ");
       Serial.println(now_fish_food_count);
+      // I2C 사용시
+      // Wire.beginTransmission(slave2);
+      // Wire.wirte('feeding')
     }
   }
-
-  //  feeding();
-
 
   // 하루가 지났다면 먹이를 주는 횟수를 초기화합니다.
   // nowtime: 추후 현재시간을 받아 체크로 바꿈
@@ -245,7 +265,7 @@ void check_state() {
     now_fish_food_count == 0;
   }
 
-  // 산소가 제대로 전달되는 지를 확이납니다.
+  // 산소가 제대로 전달되는 지를 확인합니다.
   if (now_oxygen > fishbowl_oxygen) {
     oxygen_change(-1);
   }
@@ -305,11 +325,25 @@ void printLocalTime(WiFiClient client)
 
 void printCurrentState(WiFiClient client)
 {
-  client.println("now state in smartfishbowl\n");
-  client.println("temp: " + String(temp));
-  client.println("watering_day: " + String(watering_day));
-  client.println("fish_food_amount: " + String(fish_food_amount));
-  client.println("fishbowl_oxygen: " + String(fishbowl_oxygen));
+
+
+  //form action check
+  client.println("<form action = \"/smartFishBowlDatas\"id = \"form\">");
+  client.println("  <p>Temp:&nbsp;&nbsp;&nbsp;&nbsp;&nbsp" + String(temp)
+                 + "&nbsp;&nbsp;&nbsp;&nbsp;&nbspnew&nbsp;&nbsp;&nbsp;&nbsp;&nbsp<input type=\"text\" name=\"temp\"><p>");
+  client.println("  <p>Watering_day:&nbsp;&nbsp;&nbsp;&nbsp;&nbsp" + String(watering_day)
+                 + "&nbsp;&nbsp;&nbsp;&nbsp;&nbspnew&nbsp;&nbsp;&nbsp;&nbsp;&nbsp<input type=\"text\" name=\"watering_day\"><p>");
+  //  client.println("  <p>Fish_food_amount: <input type=\"text\" name=\"fish_food\"><p>");
+  client.println("  <p>Fish_food_time1:&nbsp;&nbsp;&nbsp;&nbsp;&nbsp" + String(fish_food_time[0])
+                 + "&nbsp;&nbsp;&nbsp;&nbsp;&nbspnew&nbsp;&nbsp;&nbsp;&nbsp;&nbsp<input type=\"text\" name=\"Fish_food_time1\"><p>");
+  client.println("  <p>Fish_food_time2:&nbsp;&nbsp;&nbsp;&nbsp;&nbsp" + String(fish_food_time[1])
+                 + "&nbsp;&nbsp;&nbsp;&nbsp;&nbspnew&nbsp;&nbsp;&nbsp;&nbsp;&nbsp<input type=\"text\" name=\"Fish_food_time2\"><p>");
+  client.println("  <p>Fish_food_time3:&nbsp;&nbsp;&nbsp;&nbsp;&nbsp" + String(fish_food_time[2])
+                 + "&nbsp;&nbsp;&nbsp;&nbsp;&nbspnew&nbsp;&nbsp;&nbsp;&nbsp;&nbsp<input type=\"text\" name=\"Fish_food_time3\"><p>");
+  client.println("  <input type=\"submit\" value=\"enter\"/>");
+  client.println("</form>");
+
+
 
 }
 
@@ -336,14 +370,6 @@ void loop()
 
     Serial.println("\npublish auto");
     checkMil = millis();
-    //    sprintf(payload, "{\"temp\":%d, \"watering_day\":%d}", temp, watering_day);
-    //    if (fish.publish(pTOPIC_NAME, payload) == 0) {
-    //      Serial.println("Publish in auto");
-    //      Serial.print("Publish Message:");
-    //      Serial.println(payload);
-    //    }
-    //    else
-    //      Serial.println("Publish failed");
     publish();
 
     // 위의 과정을 통해 데이터가 왔다면
@@ -389,14 +415,28 @@ void loop()
               publish();
             }
             if (header.indexOf("GET /smartFishBowlDatas?") >= 0 ) {
-              int index = 29;
+
               Serial.println("Get /smartFishBowlDatas");
-              temp = 0; // 새로운 값을 입력하기 위해 temp 초기화
+              // temp 설정
+              int index = 29;
+              int get_temp = 0; // 새로운 값을 입력하기 위해 temp 초기화
               while (header[index] >= '0' && header[index] <= '9') {
-                temp = temp * 10 + header[index++] - '0';
+                get_temp = get_temp * 10 + header[index++] - '0';
               }
+
+              // watering_day설정
+
+
+              // food time 설정
+
+
+
+              // 위에서 문제가 없다면 데이터를 아래에 저장합니다.
+              temp = get_temp;
               Serial.println("Print temp after while: " +  String(temp));
               Serial.println("End of Get /smartFishBowlDatas");
+
+//              publish();
             }
 
 
@@ -416,20 +456,14 @@ void loop()
             client.println("<body><h1>ESP32 Web Server</h1>");
             // Display current state, and ON/OFF buttons for GPIO 16
             client.println("<p>Smart FishBowl</p>");
-            //form action check
-            client.println("<form action = \"/smartFishBowlDatas\"id = \"form\">");
-            client.println("  <p>Temp: <input type=\"text\" name=\"temp\"><p>");
-            client.println("  <p>Watering_day: <input type=\"text\" name=\"watering_day\"><p>");
-            client.println("  <p>Fish_food_amount: <input type=\"text\" name=\"fish_food\"><p>");
-            client.println("  <p>Fishbowl_oxygen: <input type=\"text\" name=\"fishbowl_oxygen\"><p>");
-            client.println("  <input type=\"submit\" value=\"enter\"/>");
-            client.println("</form>");
 
-            //            printLocalTime(client);
-            //            printCurrentState(client);
+            // 현재 상태와 값 변경 form 표시
+            printCurrentState(client);
+            // 현재시간을 표시함
+            printLocalTime(client);
+
+
             client.println("<p><a href=\"/smartfishbowl/publish\"><button class=\"button\">PUBLISH</a></p>");
-
-
             client.println("</body></html>");
             // The HTTP response ends with another blank line
             client.println();
