@@ -187,16 +187,18 @@ void set_WaterPump() {
 void set_DefaultData() {
   Serial.println("\n\nStart set defaultdata\n\n");
   sprintf(payload, "{}");
-  // AWS에 작성한 payload를 전송합니다.
+  // AWS에서 저장된 설정을 불러옵니다.
   while (1) {
-    if (fish.publish(pTOPIC_NAME, payload) == 0) {
-      Serial.print("Publish Message:");
+    // publish에 성공할 경우 메세지를 publish하고, 반복문을 탈출합니다.
+    if (fish.publish("$aws/things/smart_fishbowl/shadow/get", payload) == 0) {
+      Serial.print("Getting data to AWS with using Publish Message:");
       Serial.println(payload);
       break;
     }
+    // 실패했을 경우 처음으로 돌아가 다시 요청합니다.
     else {
-      Serial.println("Publish failed");
-      continue;
+      Serial.println("Publish failed try again");
+      // continue;
     }
   }
 
@@ -220,6 +222,8 @@ void set_Functions() {
 
   // 수환 기능
   set_WaterPump();
+
+  set_DefaultData();
 }
 
 // 현재상태를 체크하고 상태값을 변경합니다.
