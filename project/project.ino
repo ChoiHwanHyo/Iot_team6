@@ -16,7 +16,7 @@ char HOST_ADDRESS[] = "";
 // AWS에 접속할 클라이언트의 이름입니다.
 char CLIENT_ID[] = "ESP32_Smart_FishBowl";
 // subscribe할 topic입니다.
-char sTOPIC_NAME[] = "$aws/things/smart_fishbowl/shadow/update/delta";
+char sTOPIC_NAME[] = "smartfish/accept";
 // publish할 topic입니다.
 char pTOPIC_NAME[] = "$aws/things/smart_fishbowl/shadow/update";
 // 구독한 주제를 통해 메시지가 오면 읽습니다.
@@ -34,10 +34,10 @@ const long flagMil = 10000; // 10초
 
 // 스마트 어항의 기능 구현을 위한 상태 변수
 float temp = 12.0;
-int watering_day = 14; // 물을 가는 주기 설정
+int watering_day = 7; // 물을 가는 주기 설정
 int current_watering_day = 0; // 물을 가는 주기를 체크하기 위해 얼마나 기간이 되었는지를 체크
 int fish_food_count = 3;
-int fish_food_time[3][3] = {{9, 0, 0}, {13, 0, 0}, {17, 0, 0}};
+int fish_food_time[3][3] = {{12, 21, 0}, {13, 0, 0}, {17, 0, 0}};
 String temp_state = "normal";
 
 // 서버 시간 관련 변수
@@ -49,14 +49,14 @@ const int daylightOffset_sec = 0; // 3600
 unsigned long currentTime = millis();
 unsigned long previousTime = 0;
 const long timeoutTime = 10000;
-
+String header;
 // Feeder 변수
 #define MIN_SIGNAL 800 // 최소 pwm값
 #define MAX_SIGNAL 1650 // 최대 pwm값
 
 Servo motorA; // 서보모터를 사용하는 객체 설정
 int motorA_pin = 3; // 서보모터가 사용할 핀의 번호 설정
-float weight = 3.0;
+float weight = 1.0;
 const float percount = 0.14;//1번 회전 당 weight(단위: g)
 int N_times = weight / percount;//돌아야 하는 서보모터의 회전. (왔다갔다하는 수)
 
@@ -76,7 +76,7 @@ const int inpump_pin = 22;
 const int outpump_pin = 13;
 const int waterlevel_pin = 26;  // ANALOG PIN NEEDED
 int MAX_WATER = 2800;
-int waterLevel;
+float waterLevel;
 
 
 
@@ -145,12 +145,6 @@ void checkMessage() {
     msgReceived = 0;
     Serial.print("Received Message:");
     Serial.println(rcvdPayload);
-    //    Parse JSON
-    //    JSONVar myObj = JSON.parse(rcvdPayload);
-    //    JSONVar state = myObj["state"];
-    //    String temp = (const char*) state["temp"];
-    //    Serial.print("LED will be ");
-    //    Serial.println((const char*) state["temp"]);
 
   }
 }
@@ -159,25 +153,8 @@ void checkMessage() {
 void publish() {
   // publish할 payload입니다.
   // 기준온도, 물을 가는 주기, 현재 온도에 따른 상태, 물을 갈아야하는지의 여부를 전송합니다.
-  sprintf(payload, "{\"state\":{\"reported\":{\"temp\":%f, \"watering_day\":%d, \"temp_state\":\"%s\", \"watering_state\":%d}}}",
-          temp, watering_day, temp_state, watering_state);
-  //  static int a = 0;
-  //  if (a == 0) {
-  //    sprintf(payload, "{\"state\":{\"reported\":{\"temp\":%f, \"watering_day\":%d, \"current_watering_day\":%d, \"temp_state\":\"%s\"}}}",
-  //            temp, 17, current_watering_day, "normal");
-  //    a++;
-  //  }
-  //  else if (a == 1) {
-  //    sprintf(payload, "{\"state\":{\"reported\":{\"temp\":%f, \"watering_day\":%d, \"current_watering_day\":%d, \"temp_state\":\"%s\"}}}",
-  //            temp, 5, current_watering_day, "high");
-  //    a++;
-  //  }
-  //  else if (a == 2) {
-  //    sprintf(payload, "{\"state\":{\"reported\":{\"temp\":%f, \"watering_day\":%d, \"current_watering_day\":%d, \"temp_state\":\"%s\"}}}",
-  //            temp, 2, current_watering_day, "low");
-  //    a = 0;
-  //  }
-
+  sprintf(payload, "{\"state\":{\"reported\":{\"temp\":%f, \"watering_day\":%d, \"current_watering_day\":%d, \"temp_state\":\"%s\"}}}",
+          temp, watering_day, current_watering_day, temp_state);
 
   // AWS에 작성한 payload를 전송합니다.
   if (fish.publish(pTOPIC_NAME, payload) == 0) {
@@ -207,6 +184,31 @@ void set_WaterPump() {
 
 }
 
+void set_DefaultData() {
+  Serial.println("\n\nStart set defaultdata\n\n");
+  sprintf(payload, "{}");
+  // AWS에 작성한 payload를 전송합니다.
+  while (1) {
+    if (fish.publish(pTOPIC_NAME, payload) == 0) {
+      Serial.print("Publish Message:");
+      Serial.println(payload);
+      break;
+    }
+    else {
+      Serial.println("Publish failed");
+      continue;
+    }
+  }
+
+  if (msgReceived == 1) {
+    msgReceived = 0;
+    Serial.print("Received Message:");
+    Serial.println(rcvdPayload);
+    // 받은 값들 parse해서 저장하기 - 미구현
+
+  }
+}
+
 void set_Functions() {
   // 스마트 어항에 필요한 기능들을 설정합니다.
 
@@ -223,25 +225,13 @@ void set_Functions() {
 // 현재상태를 체크하고 상태값을 변경합니다.
 void check_state() {
   struct tm timeinfo; // 시간 관련 객체 생성
-
+  if (!getLocalTime(&timeinfo))
+  {
+    Serial.println("Failed to obtain time");
+    return;
+  }
   // 수온을 측정하고 설정된 기준값+-5도에 어긋날 경우 필요한 행동을 취합니다.
-  check_waterTemp();
-
-  // 물을 환수하는 주기일 경우, 물을 환수합니다.
-  check_wateringDay(timeinfo);
-
-  // 물이 너무 탁해졌을 경우, 물을 환수합니다.
-  check_waterTurbidity();
-
-  // 먹이를 주는 시간일 경우 최대 3번 먹이를 줍니다.
-  check_feeding(timeinfo);
-
-  // 센서들을 통해 얻은 수온이나, 탁도, 서버의 시간을 통해
-  // 기능의 상태를 변경합니다.
-
-}
-
-void check_waterTemp() {
+  //  check_waterTemp();
   DS18B20.requestTemperatures();       // send the command to get temperatures
   tempC = DS18B20.getTempCByIndex(0);  // read temperature in °C
   //  tempF = tempC * 9 / 5 + 32; // convert °C to °F
@@ -263,22 +253,20 @@ void check_waterTemp() {
 
   Serial.println("End waterTemp");
 
-}
-
-// 물을 환수하는 날인 경우 환수를 실행합니다.
-void check_wateringDay(struct tm timeinfo) {
+  // 물을 환수하는 주기일 경우, 물을 환수합니다.
+  //  check_wateringDay(timeinfo);
   Serial.println("Start check wateringDay");
   if (current_watering_day == watering_day) {
-    watering();
+    Serial.println("watering!!");
+    //    watering();
   }
   else { // test
     current_watering_day++;
   }
   Serial.println("End check wateringDay");
-}
 
-// 수질을 체크하여 탁하다면 환수를 합니다.
-void check_waterTurbidity() {
+  // 물이 너무 탁해졌을 경우, 물을 환수합니다.
+  //  check_waterTurbidity();
   Serial.println("Start check WaterTurbidity");
   turbidityValue = analogRead(turbidity_pin);// read the input on analog pin 0:
   Serial.println(turbidityValue); // print out the value you read:
@@ -290,12 +278,10 @@ void check_waterTurbidity() {
   }
   Serial.println("End check WaterTurbidity");
 
-  //  delay(500);
-}
 
-// 먹이를 주는지를 체크합니다.
-void check_feeding(struct tm timeinfo) {
-  Serial.println("Start check feeding");
+  // 먹이를 주는 시간일 경우 최대 3번 먹이를 줍니다.
+  //  check_feeding(timeinfo);
+  Serial.println("Start check feeding\n\n");
   // timeinfo를 통해 시간과 분을 받고
   // fish_food_time[3][3]
   // i = 주는 순서 0, 1, 2 아침, 점심, 저녁이라고 생각하면 된다.
@@ -308,16 +294,22 @@ void check_feeding(struct tm timeinfo) {
     }
   }
 
-  Serial.println("End check feeding");
+  Serial.println("End check feeding\n\n");
+
+  // 센서들을 통해 얻은 수온이나, 탁도, 서버의 시간을 통해
+  // 기능의 상태를 변경합니다.
 
 }
 
+
+
 // 먹이를 주는 함수
 void feeding(int n) {
-  Serial.println("Start feeding!");
+  Serial.println("Start feeding!\n\n");
 
   for (int i = 0; i < N_times; i++)
   {
+    Serial.println("do it!\n\n");
     motorA.writeMicroseconds(MAX_SIGNAL);
     delay(600);
 
@@ -331,7 +323,7 @@ void feeding(int n) {
   fish_food_count--;
   fish_food_time[n][2] = 1;
 
-  Serial.println("End feeding");
+  Serial.println("End feeding\n\n");
 }
 
 // 환수하는 함수
@@ -342,7 +334,7 @@ void watering() {
   while (1) {
     Serial.println("watering!!\n");
     waterLevel = analogRead(waterlevel_pin);
-    // Serial.println(waterLevel);
+    Serial.println(waterLevel);
     if (waterLevel < 10) {
       digitalWrite(outpump_pin, LOW); // END WATER OUT
       digitalWrite(inpump_pin, HIGH); // START WATER IN
@@ -361,7 +353,197 @@ void watering() {
 
 // 웹페이지를 보여주는 함수
 void show_WebPage(WiFiClient client) {
+  if (client)
+  { // If a new client connects,
+    currentTime = millis();
+    previousTime = currentTime;
+    Serial.println("New Client."); // print a message out in the serial port
+    String currentLine = ""; // make a String to hold incoming data from the client
+    while (client.connected() && currentTime - previousTime <= timeoutTime) { // loop while the client's connected
+      currentTime = millis();
+      if (client.available()) { // if there's bytes to read from the client,
+        char c = client.read(); // read a byte, then
+        Serial.write(c); // print it out the serial monitor
+        header += c;
+        if (c == '\n') { // if the byte is a newline character
 
+          if (currentLine.length() == 0) {
+
+            client.println("HTTP/1.1 200 OK");
+            client.println("Content-type:text/html");
+            client.println("Connection: close");
+            client.println();
+
+
+            // 조건 처리 부분
+            // publish 부분
+            if (header.indexOf("GET /smartfishbowl/publish") >= 0 ) {
+              Serial.println("smartfishbowl/update");
+              publish();
+            }
+
+            if (header.indexOf("GET /smartfishbowl/update?") >= 0 ) {
+
+              // temp처리부분
+              Serial.println("header.indexOf_temp: " + String(header.indexOf("temp=")));
+              int tempindex = header.indexOf("temp=") + 5;
+              int header_temp = 0; // 새로운 값을 입력하기 위해 temp 초기화
+              while (header[tempindex] >= '0' && header[tempindex] <= '9') {
+                header_temp = header_temp * 10 + header[tempindex++] - '0';
+              }
+              Serial.println("Print temp after while: " +  String(header_temp));
+
+              // watering_day 처리부분
+
+              Serial.println("header.indexOf_watering_day: " + String(header.indexOf("watering_day=")));
+              int waterindex = header.indexOf("watering_day=") + 13;
+              int header_watering = 0; // 새로운 값을 입력하기 위해 watering 초기화
+              while (header[waterindex] >= '0' && header[waterindex] <= '9') {
+                header_watering = header_watering * 10 + header[waterindex++] - '0';
+              }
+              Serial.println("Print watering_day after while: " +  String(header_watering));
+
+              // fish_food_time1 처리부분
+
+              Serial.println("header.indexOf_fish_food_time1: " + String(header.indexOf("fish_food1=")));
+              int timeindex1 = header.indexOf("fish_food1=") + 11;
+              int header_hour1 = 0; // 새로운 값을 입력하기 위해 time 초기화
+              int header_min1 = 0;
+              while (header[timeindex1] >= '0' && header[timeindex1] <= '9') {
+                header_hour1 = header_hour1 * 10 + header[timeindex1++] - '0';
+              }
+              // :는 3개 건너뛴다
+              timeindex1 += 3;
+
+              while (header[timeindex1] >= '0' && header[timeindex1] <= '9') {
+                header_min1 = header_min1 * 10 + header[timeindex1++] - '0';
+              }
+
+              Serial.println("Print time after while: " +  String(header_hour1) + ":" + String(header_min1));
+
+              // fish_food_time2 처리부분
+
+              Serial.println("header.indexOf_fish_food_time2: " + String(header.indexOf("fish_food2=")));
+              int timeindex2 = header.indexOf("fish_food2=") + 11;
+              int header_hour2 = 0; // 새로운 값을 입력하기 위해 time 초기화
+              int header_min2 = 0;
+              while (header[timeindex2] >= '0' && header[timeindex2] <= '9') {
+                header_hour2 = header_hour2 * 10 + header[timeindex2++] - '0';
+              }
+              // :는 3개 건너뛴다
+              timeindex2 += 3;
+
+              while (header[timeindex2] >= '0' && header[timeindex2] <= '9') {
+                header_min2 = header_min2 * 10 + header[timeindex2++] - '0';
+              }
+
+              Serial.println("Print time after while: " +  String(header_hour2) + ":" + String(header_min2));
+
+              // fish_food_time3 처리부분
+
+              Serial.println("header.indexOf_fish_food_time3: " + String(header.indexOf("fish_food3=")));
+              int timeindex3 = header.indexOf("fish_food3=") + 11;
+              int header_hour3 = 0; // 새로운 값을 입력하기 위해 time 초기화
+              int header_min3 = 0;
+              while (header[timeindex3] >= '0' && header[timeindex3] <= '9') {
+                header_hour3 = header_hour3 * 10 + header[timeindex3++] - '0';
+              }
+              // :는 3개 건너뛴다
+              timeindex3 += 3;
+
+              while (header[timeindex3] >= '0' && header[timeindex3] <= '9') {
+                header_min3 = header_min3 * 10 + header[timeindex3++] - '0';
+              }
+
+              Serial.println("Print time after while: " +  String(header_hour3) + ":" + String(header_min3));
+
+
+
+              // 조건에 맞을 경우 저장 아니면 저장 x
+              if (header_temp) {
+                temp = header_temp;
+              }
+              if (header_watering) {
+                watering_day = header_watering;
+              }
+              if (header_hour1 && header_min1)
+              {
+                fish_food_time[0][0] = header_hour1;
+                fish_food_time[0][1] = header_min1;
+              }
+              if (header_hour2 && header_min2)
+              {
+                fish_food_time[1][0] = header_hour2;
+                fish_food_time[1][1] = header_min2;
+              }
+              if (header_hour3 && header_min3)
+              {
+                fish_food_time[2][0] = header_hour3;
+                fish_food_time[2][1] = header_min3;
+              }
+              Serial.println("End of Get /smartFishBowlDatas");
+            }
+
+
+            // Display the HTML web page
+            client.println("<!DOCTYPE html><html>");
+            client.println("<head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">");
+            client.println("<link rel=\"icon\" href=\"data:,\">");
+            // CSS to style the on/off buttons
+            // Feel free to change the background-color and font-size attributes to fit your preferences
+            client.println("<style>html { font-family: Helvetica; display: inline-block; margin: 0px auto; text-align: center;}");
+            client.println(".button { background-color: #4CAF50;border: none; color: white; padding: 16px 40px;");
+            client.println("text-decoration: none; font-size: 30px; margin: 2px; cursor: pointer;}");
+            client.println(".button2 {background-color: #555555;}</style></head>");
+
+
+            // Web Page Heading
+            client.println("<body><h1>ESP32 Web Server</h1>");
+            // Display current state, and ON/OFF buttons for GPIO 16
+            client.println("<p>Smart FishBowl</p>");
+            //form action check
+            client.println("<form action = \"/smartfishbowl/update\"id = \"form\">");
+            client.println("  <p>Temp:&nbsp" + String(temp) + "<input type=\"text\" name=\"temp\"><p>");
+            client.println("  <p>Watering_day:&nbsp" + String(watering_day) + "<input type=\"text\" name=\"watering_day\"><p>");
+            client.println("  <p>Fish_food_time 1:&nbsp" + String(fish_food_time[0][0]) + "&nbsp:&nbsp" + String(fish_food_time[0][1])
+                           + "<input type=\"text\" name=\"fish_food1\"><p>");
+            client.println("  <p>Fish_food_time 2:&nbsp" + String(fish_food_time[1][0]) + "&nbsp:&nbsp" + String(fish_food_time[1][1])
+                           + "<input type=\"text\" name=\"fish_food2\"><p>");
+            client.println("  <p>Fish_food_time 3:&nbsp" + String(fish_food_time[2][0]) + "&nbsp:&nbsp" + String(fish_food_time[2][1])
+                           + "<input type=\"text\" name=\"fish_food3\"><p>");
+            client.println("  <input type=\"submit\" value=\"enter\"/>");
+            client.println("</form>");
+
+            //            printLocalTime(client);
+            //            printCurrentState(client);
+            // publish button
+            // client.println("<p><a href=\"/smartfishbowl/publish\"><button class=\"button\">PUBLISH</a></p>");
+
+
+            client.println("</body></html>");
+            // The HTTP response ends with another blank line
+            client.println();
+            // Break out of the while loop
+            break;
+          } //** if (currentLine.length() == 0) {
+          else
+          { // if you got a newline, then clear currentLine
+            currentLine = "";
+          }
+        } //** if (c == '\n') {
+        else if (c != '\r')
+        { // if you got anything else but a carriage return character,
+          currentLine += c; // add it to the end of the currentLine
+        }
+      } //* if (client.available()) {
+    } //** while
+    // Clear the header variable
+    header = "";
+    // Close the connection
+    client.stop();
+    Serial.println("Client disconnected.");
+    Serial.println("");
+  } //** if (client) {
 }
 
 void setup() {
@@ -388,7 +570,7 @@ void setup() {
 }
 
 void loop() {
-  // 일정시간마다 현재 상태를 체크하여 상태값을 변동시키고 publlish합니다.
+  //   일정시간마다 현재 상태를 체크하여 상태값을 변동시키고 publlish합니다.
   if ((millis() - checkMil) > flagMil) {
     Serial.println("check state and publish");
     check_state();
@@ -397,8 +579,8 @@ void loop() {
     checkMil = millis();
   }
 
-  //  WiFiClient client = server.available();
-  //  show_WebPage(client);
+  WiFiClient client = server.available();
+  show_WebPage(client);
 
 
 }
