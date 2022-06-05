@@ -145,7 +145,7 @@ void checkMessage() {
     msgReceived = 0;
     Serial.print("Received Message:");
     Serial.println(rcvdPayload);
-
+    JSONVar myObj = JSON.parse(rcvdPayload);
   }
 }
 
@@ -188,11 +188,46 @@ void set_DefaultData() {
   Serial.println("\n\nStart set defaultdata\n\n");
   sprintf(payload, "{}");
   // AWS에서 저장된 설정을 불러옵니다.
+  char pTOPIC_NAME2[] = "$aws/things/smart_fishbowl/shadow/get";
   while (1) {
     // publish에 성공할 경우 메세지를 publish하고, 반복문을 탈출합니다.
-    if (fish.publish("$aws/things/smart_fishbowl/shadow/get", payload) == 0) {
+    if (fish.publish(pTOPIC_NAME2, payload) == 0) {
       Serial.print("Getting data to AWS with using Publish Message:");
       Serial.println(payload);
+
+      if (msgReceived == 1) {
+        msgReceived = 0;
+        Serial.print("Received Message:");
+        Serial.println(rcvdPayload);
+        // 받은 값들 parse해서 저장하기
+        Serial.println("print state, desired, temp, watering_day, current_watering_day");
+        JSONVar myObj = JSON.parse(rcvdPayload);
+        JSONVar state = myObj["state"];
+        JSONVar desired = state["desired"];
+
+        // 마지막으로 설정한 기준 온도값을 받아옵니다.
+        JSONVar desired_temp = desired["temp"];
+        Serial.print("get temp data!! temp is ");
+        temp = (int) desired_temp;
+        Serial.println(temp);
+
+        // 마지막으로 설정한 수환 주기를 받아옵니다.
+        JSONVar desired_watering_day = desired["watering_day"];
+        Serial.print("get watering_day data!! watering_day is ");
+        watering_day = (int) desired_watering_day;
+        Serial.println(watering_day);
+
+        // 어항의 물이 얼마나 경과되었는지를 받아옵니다.
+        JSONVar desired_current_watering_day = desired["current_watering_day"];
+        Serial.print("get current_watering_day data!! current_watering_day is ");
+        current_watering_day = (int) desired_current_watering_day;
+        Serial.println(current_watering_day);
+
+      } else {
+        delay(2000);
+        continue;
+      }
+
       break;
     }
     // 실패했을 경우 처음으로 돌아가 다시 요청합니다.
@@ -200,14 +235,6 @@ void set_DefaultData() {
       Serial.println("Publish failed try again");
       // continue;
     }
-  }
-
-  if (msgReceived == 1) {
-    msgReceived = 0;
-    Serial.print("Received Message:");
-    Serial.println(rcvdPayload);
-    // 받은 값들 parse해서 저장하기 - 미구현
-
   }
 }
 
@@ -223,6 +250,7 @@ void set_Functions() {
   // 수환 기능
   set_WaterPump();
 
+  // 설정된 기본값을 AWS IoT에서 불러옵니다.
   set_DefaultData();
 }
 
