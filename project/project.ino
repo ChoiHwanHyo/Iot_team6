@@ -72,9 +72,9 @@ float tempC = 0.0;
 int turbidity_pin = 36;
 int turbidityValue;
 // 환수기능 변수
-const int inpump_pin = 22;
-const int outpump_pin = 13;
-const int waterlevel_pin = 26;  // ANALOG PIN NEEDED
+const int inpump_pin = 12;
+const int outpump_pin = 14;
+const int waterlevel_pin = 33;  // ANALOG PIN NEEDED
 int MAX_WATER = 2800;
 float waterLevel;
 
@@ -290,7 +290,7 @@ void check_state() {
   Serial.println("Start check wateringDay");
   if (current_watering_day == watering_day) {
     Serial.println("watering!!");
-    //    watering();
+    watering();
   }
   else { // test
     current_watering_day++;
@@ -306,7 +306,7 @@ void check_state() {
   if (turbidityValue < 1500) { // 탁한 기준
     // 워터펌프 작동
     Serial.println("watering!!");
-    //    watering();
+    watering();
   }
   Serial.println("End check WaterTurbidity");
 
@@ -328,6 +328,11 @@ void check_state() {
 
   Serial.println("End check feeding\n\n");
 
+
+  //  Serial.println("Start check waterLevel");
+  //  waterLevel = analogRead(waterlevel_pin);
+  //  Serial.println(waterLevel);
+  //  Serial.println("End check waterLevel");
   // 센서들을 통해 얻은 수온이나, 탁도, 서버의 시간을 통해
   // 기능의 상태를 변경합니다.
 
@@ -362,16 +367,22 @@ void feeding(int n) {
 void watering() {
   Serial.println("Start watering");
   // 워터펌프를 작동하여 물을 환수합니다.
+  // 물이 뺀다.
   digitalWrite(outpump_pin, HIGH); // START WATER OUT
   while (1) {
     Serial.println("watering!!\n");
     waterLevel = analogRead(waterlevel_pin);
     Serial.println(waterLevel);
-    if (waterLevel < 10) {
+    // 물을 채운다.
+    if (waterLevel < 800) {
+      Serial.println("did!");
       digitalWrite(outpump_pin, LOW); // END WATER OUT
       digitalWrite(inpump_pin, HIGH); // START WATER IN
     }
+
+    // 물이 어느정도 채워지면 종료한다.
     if (waterLevel > MAX_WATER) {
+      Serial.println("end!!");
       digitalWrite(inpump_pin, LOW); // END WATER IN
       break;
     }
