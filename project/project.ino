@@ -57,8 +57,8 @@ const long timeoutTime = 5000;
 String header;
 
 // Feeder 변수
-#define MIN_SIGNAL 800 // 최소 pwm값
-#define MAX_SIGNAL 1650 // 최대 pwm값
+#define MIN_SIGNAL 600 // 최소 pwm값
+#define MAX_SIGNAL 1750 // 최대 pwm값
 Servo motorA; // 서보모터를 사용하는 객체 설정
 int motorA_pin = 3; // 서보모터가 사용할 핀의 번호 설정
 float weight = 1.0;
@@ -76,11 +76,13 @@ float tempC = 0.0;
 // 탁도 변수
 int turbidity_pin = 36;
 int turbidityValue;
+int turbidityMIN = 700;
 // 수환기능 변수
 const int inpump_pin = 12;
 const int outpump_pin = 14;
 const int waterlevel_pin = 33;  // ANALOG PIN NEEDED
 int MAX_WATER = 2800;
+int MIN_WATER = 1200;
 float waterLevel;
 
 
@@ -167,6 +169,8 @@ void publish() {
   }
   else
     Serial.println("Publish failed");
+
+  //  current_watering_day++;
 }
 
 void set_Feeder() {
@@ -242,6 +246,10 @@ void set_DefaultData() {
         JSONVar desired_fish_min_3 = desired["fish_min_3"];
         fish_food_time[2][1] = (int) desired_fish_min_3;
 
+        JSONVar desired_today = desired["today"];
+        today = (int) desired_today;
+        Serial.printf("today: %d\n", today);
+
       } else {
         delay(2000);
         continue;
@@ -285,7 +293,8 @@ void check_state() {
   // 하루가 지났다면 변수를 초기화 시킵니다.
   if (today != timeinfo.tm_mday) {
     Serial.println("\n\n Doit reset state\n\n");
-    Serial.printf("before count = %d", fish_food_count);
+    //    Serial.printf("before count = %d", fish_food_count);
+    Serial.printf("current_watering_day: %d", current_watering_day);
     today = timeinfo.tm_mday;
     fish_food_count = 3;
     for (int i = 0; i < 3; i++) {
@@ -319,9 +328,24 @@ void check_state() {
 
   //  Serial.println("End waterTemp");
 
+  // 물이 너무 탁해졌을 경우, 물을 환수합니다.
+  //  check_waterTurbidity();
+  //  Serial.println("Start check WaterTurbidity");
+  turbidityValue = analogRead(turbidity_pin);// read the input on analog pin 0:
+  Serial.print("WaterTurbidity is ");
+  Serial.println(turbidityValue); // print out the value you read:
+
+  if (turbidityValue < turbidityMIN) { // 탁한 기준
+    // 워터펌프 작동
+    Serial.println("watering!!");
+    watering();
+  }
+  //  Serial.println("End check WaterTurbidity");
+
   // 물을 환수하는 주기일 경우, 물을 환수합니다.
   //  check_wateringDay(timeinfo);
   //  Serial.println("Start check wateringDay");
+  Serial.printf("current_watering_day: %d\twatering_day: %d\n", current_watering_day, watering_day);
   if (current_watering_day >= watering_day) {
     Serial.println("Day to watering!!");
     watering();
@@ -330,20 +354,6 @@ void check_state() {
     //    current_watering_day++;
   }
   //  Serial.println("End check wateringDay");
-
-  // 물이 너무 탁해졌을 경우, 물을 환수합니다.
-  //  check_waterTurbidity();
-  //  Serial.println("Start check WaterTurbidity");
-  turbidityValue = analogRead(turbidity_pin);// read the input on analog pin 0:
-  Serial.print("WaterTurbidity is ");
-  Serial.println(turbidityValue); // print out the value you read:
-
-  if (turbidityValue < 1500) { // 탁한 기준
-    // 워터펌프 작동
-    Serial.println("watering!!");
-    watering();
-  }
-  //  Serial.println("End check WaterTurbidity");
 
 
   // 먹이를 주는 시간일 경우 최대 3번 먹이를 줍니다.
@@ -365,6 +375,8 @@ void check_state() {
 
   // 센서들을 통해 얻은 수온이나, 탁도, 서버의 시간을 통해
   // 기능의 상태를 변경합니다.
+  // 빠르게 실험을 보여드리기 위해 상태를 측정한후 하루가 지났다고 가정
+  current_watering_day++;
 
 }
 
@@ -393,30 +405,39 @@ void feeding(int n) {
 
 // 환수하는 함수
 void watering() {
+  bool flag = false;
   Serial.println("Start watering");
+
   // 워터펌프를 작동하여 물을 환수합니다.
   // 물이 뺀다.
   digitalWrite(outpump_pin, HIGH); // START WATER OUT
   while (1) {
+    turbidityValue = analogRead(turbidity_pin);// read the input on analog pin 0:
+    Serial.print("WaterTurbidity in while is ");
+    Serial.println(turbidityValue); // print out the value you read:
     Serial.println("watering!!\n");
     waterLevel = analogRead(waterlevel_pin);
     Serial.println(waterLevel);
     // 물을 채운다.
-    if (waterLevel < 800) {
+    if (waterLevel < MIN_WATER and !flag) {
       Serial.println("did!");
       digitalWrite(outpump_pin, LOW); // END WATER OUT
       digitalWrite(inpump_pin, HIGH); // START WATER IN
+      flag = true;
     }
 
     // 물이 어느정도 채워지면 종료한다.
-    if (waterLevel > MAX_WATER) {
+    if (waterLevel > 2800 and flag) {
       Serial.println("end!!");
       digitalWrite(inpump_pin, LOW); // END WATER IN
+      flag = false;
       break;
     }
     delay(1000);
   }
 
+  // 물을 갈았기 때문에 값을 보내어 메일로 알려줍니다.
+  publish();
   // 어항의 물을 갈았다면, 대기 날짜를 초기화 합니다.
   current_watering_day = 0;
   Serial.println("End Watering");
@@ -614,10 +635,14 @@ void show_WebPage(WiFiClient client) {
 
 void check_and_publish() {
   if ((millis() - checkMil) > flagMil) {
-    Serial.println("check state and publish");
-    check_state();
+
     Serial.println("publish!!");
     publish();
+
+    Serial.println("check state!!");
+    check_state();
+
+
     checkMil = millis();
   }
 }
